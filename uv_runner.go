@@ -19,31 +19,45 @@ func main() {
 	platform := getPlatform()
 	arch := getArch()
 	target := fmt.Sprintf("%s-%s", arch, platform)
-	
+
 	fmt.Printf("Detected platform: %s\n", target)
-	
+
 	// Create temp directory
 	tempDir, err := os.MkdirTemp("", "uv-runner-*")
 	if err != nil {
 		panic(err)
 	}
 	defer os.RemoveAll(tempDir)
-	
+
 	// Download and extract uv
 	uvPath, err := downloadUV(tempDir, target)
 	if err != nil {
 		panic(err)
 	}
-	
-	// Run the command
+
+	// Determine which scripts to run:
+	// - If the user supplies one or more paths/URLs as args, pass them through.
+	// - Otherwise, use the built-in defaults.
+	var scripts []string
+	if len(os.Args) > 1 {
+		// Use provided args as script paths/URLs
+		scripts = os.Args[1:]
+	} else {
+		// Fall back to defaults
+		scripts = []string{
+			"https://raw.githubusercontent.com/tnldart/openapi-servers/refs/heads/main/servers/memory/oneshot.py",
+			"https://raw.githubusercontent.com/tnldart/openapi-servers/refs/heads/main/servers/memory/main.py",
+		}
+	}
+
+	// Build command: uv run <scripts...>
 	fmt.Println("Running Python scripts...")
-	cmd := exec.Command(uvPath, "run", 
-		"https://raw.githubusercontent.com/tnldart/openapi-servers/refs/heads/main/servers/memory/oneshot.py",
-		"https://raw.githubusercontent.com/tnldart/openapi-servers/refs/heads/main/servers/memory/main.py")
-	
+	args := append([]string{"run"}, scripts...)
+	cmd := exec.Command(uvPath, args...)
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	err = cmd.Run()
 	if err != nil {
 		fmt.Printf("Error running uv: %v\n", err)
@@ -77,28 +91,28 @@ func getArch() string {
 
 func downloadUV(tempDir, target string) (string, error) {
 	url := fmt.Sprintf("https://github.com/astral-sh/uv/releases/download/%s/uv-%s.tar.gz", uvVersion, target)
-	
+
 	fmt.Printf("Downloading uv from: %s\n", url)
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("failed to download uv: status %d", resp.StatusCode)
 	}
-	
+
 	// Extract tar.gz
 	gzr, err := gzip.NewReader(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	defer gzr.Close()
-	
+
 	tr := tar.NewReader(gzr)
-	
+
 	var uvPath string
 	for {
 		header, err := tr.Next()
@@ -108,37 +122,37 @@ func downloadUV(tempDir, target string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		
+
 		fmt.Printf("Found file in archive: %s\n", header.Name)
-		
+
 		// Look for uv executable (could be nested in a directory)
 		if filepath.Base(header.Name) == "uv" || filepath.Base(header.Name) == "uv.exe" {
 			uvPath = filepath.Join(tempDir, filepath.Base(header.Name))
-			
+
 			file, err := os.Create(uvPath)
 			if err != nil {
 				return "", err
 			}
-			
+
 			_, err = io.Copy(file, tr)
 			file.Close()
 			if err != nil {
 				return "", err
 			}
-			
+
 			// Make executable
 			err = os.Chmod(uvPath, 0755)
 			if err != nil {
 				return "", err
 			}
-			
+
 			break
 		}
 	}
-	
+
 	if uvPath == "" {
 		return "", fmt.Errorf("uv binary not found in archive")
 	}
-	
+
 	return uvPath, nil
 }
