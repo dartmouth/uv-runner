@@ -1,0 +1,56 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    
+    - name: Build all platforms
+      run: |
+        mkdir -p dist
+        
+        # Build flags for optimized binaries
+        BUILD_FLAGS="-ldflags=-w -s -trimpath"
+        
+        # macOS
+        GOOS=darwin GOARCH=amd64 go build $BUILD_FLAGS -o dist/uv-runner-macos-intel
+        GOOS=darwin GOARCH=arm64 go build $BUILD_FLAGS -o dist/uv-runner-macos-arm64
+        
+        # Linux
+        GOOS=linux GOARCH=amd64 go build $BUILD_FLAGS -o dist/uv-runner-linux-x86_64
+        GOOS=linux GOARCH=arm64 go build $BUILD_FLAGS -o dist/uv-runner-linux-arm64
+        
+        # Windows
+        GOOS=windows GOARCH=amd64 go build $BUILD_FLAGS -o dist/uv-runner-windows-x86_64.exe
+    
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+        cat checksums.txt
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: uv-runner-binaries
+        path: dist/
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
