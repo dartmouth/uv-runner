@@ -22,18 +22,18 @@ jobs:
         mkdir -p dist
         
         # Build flags for optimized binaries
-        BUILD_FLAGS='-trimpath -ldflags=-w\ -s'
+        BUILD_ARGS=("-trimpath" "-ldflags=-w -s")
         
         # macOS
-        GOOS=darwin GOARCH=amd64 go build $BUILD_FLAGS -o dist/uv-runner-macos-intel
-        GOOS=darwin GOARCH=arm64 go build $BUILD_FLAGS -o dist/uv-runner-macos-arm64
+        GOOS=darwin GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-macos-intel
+        GOOS=darwin GOARCH=arm64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-macos-arm64
         
         # Linux
-        GOOS=linux GOARCH=amd64 go build $BUILD_FLAGS -o dist/uv-runner-linux-x86_64
-        GOOS=linux GOARCH=arm64 go build $BUILD_FLAGS -o dist/uv-runner-linux-arm64
+        GOOS=linux GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-linux-x86_64
+        GOOS=linux GOARCH=arm64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-linux-arm64
         
         # Windows
-        GOOS=windows GOARCH=amd64 go build $BUILD_FLAGS -o dist/uv-runner-windows-x86_64.exe
+        GOOS=windows GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-windows-x86_64.exe
     
     - name: Create checksums
       run: |
