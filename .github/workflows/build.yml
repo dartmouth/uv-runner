@@ -22,7 +22,7 @@ jobs:
         mkdir -p dist
         
         # Build flags for optimized binaries
-        BUILD_FLAGS="-ldflags=-w -s -trimpath"
+        BUILD_FLAGS="-ldflags=-w -s" -trimpath
         
         # macOS
         GOOS=darwin GOARCH=amd64 go build $BUILD_FLAGS -o dist/uv-runner-macos-intel
