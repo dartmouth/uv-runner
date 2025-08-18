@@ -42,7 +42,7 @@ jobs:
         cat checksums.txt
     
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: uv-runner-binaries
         path: dist/
