@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,9 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
-const uvVersion = "0.8.11" // Update as needed
+const uvVersion = "0.8.17" // Update as needed
 
 func main() {
 	// Determine platform and architecture
@@ -91,6 +93,7 @@ func getArch() string {
 
 func downloadUV(tempDir, target string) (string, error) {
 	url := fmt.Sprintf("https://github.com/astral-sh/uv/releases/download/%s/uv-%s.tar.gz", uvVersion, target)
+	checksumURL := url + ".sha256"
 
 	fmt.Printf("Downloading uv from: %s\n", url)
 
@@ -104,8 +107,61 @@ func downloadUV(tempDir, target string) (string, error) {
 		return "", fmt.Errorf("failed to download uv: status %d", resp.StatusCode)
 	}
 
-	// Extract tar.gz
-	gzr, err := gzip.NewReader(resp.Body)
+	// Create a temporary file to store the downloaded tarball
+	tmpFile, err := os.CreateTemp(tempDir, "uv-*.tar.gz")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// Download to temp file and calculate checksum
+	hasher := sha256.New()
+	multiWriter := io.MultiWriter(tmpFile, hasher)
+
+	_, err = io.Copy(multiWriter, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to save download: %w", err)
+	}
+
+	// Calculate the actual checksum
+	actualChecksum := fmt.Sprintf("%x", hasher.Sum(nil))
+
+	// Download and verify checksum
+	fmt.Printf("Downloading checksum from: %s\n", checksumURL)
+	checksumResp, err := http.Get(checksumURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download checksum: %w", err)
+	}
+	defer checksumResp.Body.Close()
+
+	if checksumResp.StatusCode != 200 {
+		return "", fmt.Errorf("failed to download checksum: status %d", checksumResp.StatusCode)
+	}
+
+	checksumBytes, err := io.ReadAll(checksumResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read checksum: %w", err)
+	}
+
+	// Parse expected checksum (typically in format: "checksum filename")
+	expectedChecksum := strings.Fields(string(checksumBytes))[0]
+
+	// Verify checksum
+	if actualChecksum != expectedChecksum {
+		return "", fmt.Errorf("checksum verification failed: expected %s, got %s", expectedChecksum, actualChecksum)
+	}
+
+	fmt.Println("Checksum verification successful")
+
+	// Reset file position for reading
+	_, err = tmpFile.Seek(0, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to reset file position: %w", err)
+	}
+
+	// Extract tar.gz from the verified file
+	gzr, err := gzip.NewReader(tmpFile)
 	if err != nil {
 		return "", err
 	}
