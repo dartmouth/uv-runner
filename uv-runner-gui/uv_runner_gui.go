@@ -9,6 +9,7 @@
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -398,7 +399,18 @@ func (a *App) downloadUV(tempDir string) (string, error) {
 
 	a.appendOutput(fmt.Sprintf("Detected platform: %s\n", target))
 
-	url := fmt.Sprintf("https://github.com/astral-sh/uv/releases/download/%s/uv-%s.tar.gz", uvVersion, target)
+	// Determine file extension based on platform
+	var fileExt string
+	var tmpFilePattern string
+	if runtime.GOOS == "windows" {
+		fileExt = ".zip"
+		tmpFilePattern = "uv-*.zip"
+	} else {
+		fileExt = ".tar.gz"
+		tmpFilePattern = "uv-*.tar.gz"
+	}
+
+	url := fmt.Sprintf("https://github.com/astral-sh/uv/releases/download/%s/uv-%s%s", uvVersion, target, fileExt)
 	checksumURL := url + ".sha256"
 
 	a.appendOutput(fmt.Sprintf("Downloading UV from: %s\n", url))
@@ -413,8 +425,8 @@ func (a *App) downloadUV(tempDir string) (string, error) {
 		return "", fmt.Errorf("failed to download uv: status %d", resp.StatusCode)
 	}
 
-	// Create a temporary file to store the downloaded tarball
-	tmpFile, err := os.CreateTemp(tempDir, "uv-*.tar.gz")
+	// Create a temporary file to store the downloaded archive
+	tmpFile, err := os.CreateTemp(tempDir, tmpFilePattern)
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -467,8 +479,17 @@ func (a *App) downloadUV(tempDir string) (string, error) {
 		return "", fmt.Errorf("failed to reset file position: %w", err)
 	}
 
+	// Extract archive based on platform
+	if runtime.GOOS == "windows" {
+		return a.extractZip(tmpFile, tempDir)
+	} else {
+		return a.extractTarGz(tmpFile, tempDir)
+	}
+}
+
+func (a *App) extractTarGz(file *os.File, tempDir string) (string, error) {
 	// Extract tar.gz from the verified file
-	gzr, err := gzip.NewReader(tmpFile)
+	gzr, err := gzip.NewReader(file)
 	if err != nil {
 		return "", err
 	}
@@ -487,9 +508,8 @@ func (a *App) downloadUV(tempDir string) (string, error) {
 		}
 
 		// Look for uv executable (could be nested in a directory)
-		baseName := filepath.Base(header.Name)
-		if baseName == "uv" || baseName == "uv.exe" {
-			uvPath = filepath.Join(tempDir, baseName)
+		if filepath.Base(header.Name) == "uv" || filepath.Base(header.Name) == "uv.exe" {
+			uvPath = filepath.Join(tempDir, filepath.Base(header.Name))
 
 			file, err := os.Create(uvPath)
 			if err != nil {
@@ -498,6 +518,60 @@ func (a *App) downloadUV(tempDir string) (string, error) {
 
 			_, err = io.Copy(file, tr)
 			file.Close()
+			if err != nil {
+				return "", err
+			}
+
+			// Make executable
+			err = os.Chmod(uvPath, 0755)
+			if err != nil {
+				return "", err
+			}
+
+			break
+		}
+	}
+
+	if uvPath == "" {
+		return "", fmt.Errorf("uv binary not found in archive")
+	}
+
+	return uvPath, nil
+}
+
+func (a *App) extractZip(file *os.File, tempDir string) (string, error) {
+	// Get file info for zip reader
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+
+	// Create zip reader
+	zr, err := zip.NewReader(file, fileInfo.Size())
+	if err != nil {
+		return "", err
+	}
+
+	var uvPath string
+	for _, f := range zr.File {
+		// Look for uv executable (could be nested in a directory)
+		if filepath.Base(f.Name) == "uv.exe" || filepath.Base(f.Name) == "uv" {
+			uvPath = filepath.Join(tempDir, filepath.Base(f.Name))
+
+			rc, err := f.Open()
+			if err != nil {
+				return "", err
+			}
+
+			outFile, err := os.Create(uvPath)
+			if err != nil {
+				rc.Close()
+				return "", err
+			}
+
+			_, err = io.Copy(outFile, rc)
+			outFile.Close()
+			rc.Close()
 			if err != nil {
 				return "", err
 			}
