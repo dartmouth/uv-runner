@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-cli:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -19,23 +19,102 @@ jobs:
       with:
         go-version: '1.25'
     
-    - name: Build all platforms
+    - name: Build CLI for all platforms
       run: |
         mkdir -p dist
         
         # Build flags for optimized binaries
-        BUILD_ARGS=("-trimpath" "-ldflags=-w -s")
+        BUILD_FLAGS=("-trimpath" "-ldflags=-w -s")
         
-        # macOS
-        GOOS=darwin GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-macos-intel
-        GOOS=darwin GOARCH=arm64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-macos-arm64
+        # Build CLI for all platforms
+        echo "Building CLI for all platforms..."
+        cd uv-runner-cli
         
-        # Linux
-        GOOS=linux GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-linux-x86_64
-        GOOS=linux GOARCH=arm64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-linux-arm64
+        # macOS CLI
+        GOOS=darwin GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o ../dist/uv-runner-cli-macos-intel
+        GOOS=darwin GOARCH=arm64 go build "${BUILD_FLAGS[@]}" -o ../dist/uv-runner-cli-macos-arm64
         
-        # Windows
-        GOOS=windows GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o dist/uv-runner-windows-x86_64.exe
+        # Linux CLI
+        GOOS=linux GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o ../dist/uv-runner-cli-linux-x86_64
+        GOOS=linux GOARCH=arm64 go build "${BUILD_FLAGS[@]}" -o ../dist/uv-runner-cli-linux-arm64
+        
+        # Windows CLI
+        GOOS=windows GOARCH=amd64 go build "${BUILD_FLAGS[@]}" -o ../dist/uv-runner-cli-windows-x86_64.exe
+        
+        cd ..
+    
+    - name: Upload CLI artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: uv-runner-cli-binaries
+        path: dist/
+
+  build-gui:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            suffix: linux-x86_64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            suffix: macos-intel
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            suffix: macos-arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            suffix: windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    
+    - name: Install Linux GUI dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev xorg-dev
+    
+    - name: Build GUI
+      run: |
+        mkdir -p dist
+        cd uv-runner-gui
+        go build -trimpath -ldflags="-w -s" -o ../dist/uv-runner-gui-${{ matrix.suffix }}
+    
+    - name: Upload GUI artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: uv-runner-gui-${{ matrix.suffix }}
+        path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-cli, build-gui]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    
+    - name: Organize artifacts
+      run: |
+        mkdir -p dist
+        find artifacts -name "uv-runner-*" -type f -exec cp {} dist/ \;
+        ls -la dist/
     
     - name: Create checksums
       run: |
@@ -43,14 +122,7 @@ jobs:
         sha256sum * > checksums.txt
         cat checksums.txt
     
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: uv-runner-binaries
-        path: dist/
-    
     - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
         files: dist/*

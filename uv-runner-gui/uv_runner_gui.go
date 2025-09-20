@@ -1,11 +1,11 @@
 // Alternative: Create output area with canvas.Text for full color control
-	// Uncomment this section and comment out the RichText section above if you want more control
-	
-	/*
+// Uncomment this section and comment out the RichText section above if you want more control
+
+/*
 	outputContainer := container.NewVScroll(container.NewVBox())
 	outputContainer.SetMinSize(fyne.NewSize(400, 200))
 	a.outputContainer = outputContainer
-	*/package main
+*/package main
 
 import (
 	"archive/tar"
@@ -97,7 +97,7 @@ func (t *smartContrastTheme) Size(name fyne.ThemeSizeName) float32 {
 	return theme.DefaultTheme().Size(name)
 }
 
-const uvVersion = "0.8.17"
+const uvVersion = "0.8.19"
 
 type App struct {
 	fyneApp      fyne.App
@@ -110,14 +110,14 @@ type App struct {
 	scripts      []string
 	uvPath       string
 	tempDir      string
-	selectedIdx  int // Track selected item manually
-	outputBuffer string // Keep track of output text
+	selectedIdx  int        // Track selected item manually
+	outputBuffer string     // Keep track of output text
 	outputMutex  sync.Mutex // Protect output buffer
 }
 
 func main() {
 	a := app.NewWithID("com.example.uvrunner")
-	
+
 	// Use smart contrast theme that adapts to system theme
 	a.Settings().SetTheme(&smartContrastTheme{})
 
@@ -175,7 +175,7 @@ func (a *App) setupUI() {
 	a.removeButton = widget.NewButton("Remove Selected", a.removeScript)
 	a.runButton = widget.NewButton("Run Scripts", a.runScripts)
 	a.runButton.Importance = widget.HighImportance
-	
+
 	// Theme toggle buttons
 	lightThemeBtn := widget.NewButton("Light Theme", func() {
 		a.fyneApp.Settings().SetTheme(theme.LightTheme())
@@ -190,14 +190,14 @@ func (a *App) setupUI() {
 	// Create output area with RichText for better theme support
 	a.outputText = widget.NewRichText()
 	a.outputText.Wrapping = fyne.TextWrapWord
-	
+
 	outputScroll := container.NewScroll(a.outputText)
 	outputScroll.SetMinSize(fyne.NewSize(400, 200))
 
 	// Layout
 	scriptControls := container.NewHBox(a.addButton, a.removeButton)
 	themeControls := container.NewHBox(lightThemeBtn, darkThemeBtn, autoThemeBtn)
-	
+
 	scriptSection := container.NewBorder(
 		widget.NewLabel("Python Scripts:"),
 		container.NewVBox(scriptControls, themeControls),
@@ -256,7 +256,7 @@ func (a *App) removeScript() {
 
 func (a *App) initializeUV() {
 	a.appendOutput("Initializing UV Python package manager...\n")
-	
+
 	go func() {
 		// Create temp directory
 		tempDir, err := os.MkdirTemp("", "uv-runner-*")
@@ -275,7 +275,7 @@ func (a *App) initializeUV() {
 
 		a.uvPath = uvPath
 		a.appendOutput("UV initialized successfully!\n")
-		
+
 		// Enable run button using fyne.Do
 		fyne.Do(func() {
 			a.runButton.Enable()
@@ -310,10 +310,10 @@ func (a *App) runScripts() {
 
 		// Build command: uv run <scripts...>
 		args := append([]string{"run"}, a.scripts...)
-		
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		
+
 		cmd := exec.CommandContext(ctx, a.uvPath, args...)
 
 		// Create pipes for stdout and stderr
@@ -338,12 +338,12 @@ func (a *App) runScripts() {
 		// Read output in goroutines
 		var wg sync.WaitGroup
 		wg.Add(2)
-		
+
 		go func() {
 			defer wg.Done()
 			a.readOutput(stdout, "STDOUT")
 		}()
-		
+
 		go func() {
 			defer wg.Done()
 			a.readOutput(stderr, "STDERR")
@@ -384,7 +384,7 @@ func (a *App) appendOutput(text string) {
 	a.outputBuffer += text
 	newText := a.outputBuffer
 	a.outputMutex.Unlock()
-	
+
 	// Use Fyne's proper threading API
 	fyne.Do(func() {
 		a.outputText.ParseMarkdown("```\n" + newText + "\n```")
