@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -111,9 +112,11 @@ type App struct {
 	scripts      []string
 	uvPath       string
 	tempDir      string
-	selectedIdx  int        // Track selected item manually
-	outputBuffer string     // Keep track of output text
-	outputMutex  sync.Mutex // Protect output buffer
+	selectedIdx  int         // Track selected item manually
+	outputBuffer string      // Keep track of output text
+	outputMutex  sync.Mutex  // Protect output buffer
+	runningCmds  []*exec.Cmd // Track running processes
+	cmdsMutex    sync.Mutex  // Protect running commands slice
 }
 
 func main() {
@@ -130,6 +133,7 @@ func main() {
 		window:       w,
 		selectedIdx:  -1, // No selection initially
 		outputBuffer: "",
+		runningCmds:  make([]*exec.Cmd, 0),
 		scripts: []string{
 			"https://raw.githubusercontent.com/tnldart/openapi-servers/refs/heads/main/servers/memory/oneshot.py",
 			"https://raw.githubusercontent.com/tnldart/openapi-servers/refs/heads/main/servers/memory/main.py",
@@ -138,6 +142,12 @@ func main() {
 
 	app.setupUI()
 	app.initializeUV()
+
+	// Set up cleanup on window close
+	w.SetCloseIntercept(func() {
+		app.cleanup()
+		w.Close()
+	})
 
 	w.ShowAndRun()
 }
@@ -255,6 +265,72 @@ func (a *App) removeScript() {
 	a.scriptList.Refresh()
 }
 
+func (a *App) cleanup() {
+	a.appendOutput("Cleaning up processes...\n")
+
+	a.cmdsMutex.Lock()
+	defer a.cmdsMutex.Unlock()
+
+	for _, cmd := range a.runningCmds {
+		if cmd.Process != nil {
+			// On macOS/Unix, kill the process group to ensure child processes are terminated
+			if runtime.GOOS != "windows" {
+				// Kill the process group (negative PID kills the process group)
+				if err := exec.Command("kill", "-TERM", fmt.Sprintf("-%d", cmd.Process.Pid)).Run(); err == nil {
+					// Wait a bit for graceful termination
+					time.Sleep(100 * time.Millisecond)
+				}
+				// Force kill if still running
+				exec.Command("kill", "-KILL", fmt.Sprintf("-%d", cmd.Process.Pid)).Run()
+			} else {
+				// On Windows, use taskkill to terminate the process tree
+				exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", cmd.Process.Pid)).Run()
+			}
+
+			// Also try direct process kill as fallback
+			cmd.Process.Kill()
+		}
+	}
+
+	// Clean up temp directory if it exists
+	if a.tempDir != "" {
+		os.RemoveAll(a.tempDir)
+	}
+
+	a.runningCmds = make([]*exec.Cmd, 0)
+	a.appendOutput("Cleanup completed.\n")
+}
+
+func (a *App) addRunningCmd(cmd *exec.Cmd) {
+	a.cmdsMutex.Lock()
+	defer a.cmdsMutex.Unlock()
+	a.runningCmds = append(a.runningCmds, cmd)
+}
+
+func (a *App) removeRunningCmd(cmd *exec.Cmd) {
+	a.cmdsMutex.Lock()
+	defer a.cmdsMutex.Unlock()
+	for i, c := range a.runningCmds {
+		if c == cmd {
+			a.runningCmds = append(a.runningCmds[:i], a.runningCmds[i+1:]...)
+			break
+		}
+	}
+}
+
+func (a *App) setupProcessGroup(cmd *exec.Cmd) {
+	// On Unix systems, create a new process group so we can kill
+	// the entire group (including child processes) when needed
+	if runtime.GOOS != "windows" {
+		// This requires platform-specific imports, but we can use SysProcAttr
+		if cmd.SysProcAttr == nil {
+			cmd.SysProcAttr = &syscall.SysProcAttr{}
+		}
+		// Create new process group
+		cmd.SysProcAttr.Setpgid = true
+	}
+}
+
 func (a *App) initializeUV() {
 	a.appendOutput("Initializing UV Python package manager...\n")
 
@@ -296,6 +372,25 @@ func (a *App) runScripts() {
 	}
 
 	a.runButton.Disable()
+
+	// Clean up any existing running processes before starting new ones
+	a.cmdsMutex.Lock()
+	if len(a.runningCmds) > 0 {
+		a.appendOutput("Stopping existing processes...\n")
+		for _, cmd := range a.runningCmds {
+			if cmd.Process != nil {
+				if runtime.GOOS != "windows" {
+					exec.Command("kill", "-TERM", fmt.Sprintf("-%d", cmd.Process.Pid)).Run()
+				} else {
+					exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", cmd.Process.Pid)).Run()
+				}
+				cmd.Process.Kill()
+			}
+		}
+		a.runningCmds = make([]*exec.Cmd, 0)
+	}
+	a.cmdsMutex.Unlock()
+
 	a.outputBuffer = "" // Clear output
 	fyne.Do(func() {
 		a.outputText.ParseMarkdown("")
@@ -317,6 +412,11 @@ func (a *App) runScripts() {
 
 		cmd := exec.CommandContext(ctx, a.uvPath, args...)
 
+		// Set up process group for proper cleanup on Unix systems
+		if runtime.GOOS != "windows" {
+			a.setupProcessGroup(cmd)
+		}
+
 		// Create pipes for stdout and stderr
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
@@ -335,6 +435,9 @@ func (a *App) runScripts() {
 			a.appendOutput(fmt.Sprintf("Error starting command: %v\n", err))
 			return
 		}
+
+		// Track the running command
+		a.addRunningCmd(cmd)
 
 		// Read output in goroutines
 		var wg sync.WaitGroup
@@ -359,6 +462,9 @@ func (a *App) runScripts() {
 		} else {
 			a.appendOutput("Scripts completed successfully!\n")
 		}
+
+		// Remove from tracking when completed
+		a.removeRunningCmd(cmd)
 	}()
 }
 
