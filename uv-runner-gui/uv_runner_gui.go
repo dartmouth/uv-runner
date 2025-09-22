@@ -23,7 +23,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -322,12 +321,7 @@ func (a *App) setupProcessGroup(cmd *exec.Cmd) {
 	// On Unix systems, create a new process group so we can kill
 	// the entire group (including child processes) when needed
 	if runtime.GOOS != "windows" {
-		// This requires platform-specific imports, but we can use SysProcAttr
-		if cmd.SysProcAttr == nil {
-			cmd.SysProcAttr = &syscall.SysProcAttr{}
-		}
-		// Create new process group
-		cmd.SysProcAttr.Setpgid = true
+		a.setupUnixProcessGroup(cmd)
 	}
 }
 
