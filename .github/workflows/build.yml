@@ -57,18 +57,22 @@ jobs:
             goos: linux
             goarch: amd64
             suffix: linux-x86_64
+            build_tags: wayland
           - os: macos-latest
             goos: darwin
             goarch: amd64
             suffix: macos-intel
+            build_tags: ""
           - os: macos-14
             goos: darwin
             goarch: arm64
             suffix: macos-arm64
+            build_tags: ""
           - os: windows-latest
             goos: windows
             goarch: amd64
             suffix: windows-x86_64.exe
+            build_tags: ""
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -84,13 +88,17 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libgl1-mesa-dev xorg-dev
+        sudo apt-get install -y libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev wayland-protocols
     
     - name: Build GUI
       run: |
         mkdir -p dist
         cd uv-runner-gui
-        go build -trimpath -ldflags="-w -s" -o ../dist/uv-runner-gui-${{ matrix.suffix }}
+        if [ -n "${{ matrix.build_tags }}" ]; then
+          go build -tags "${{ matrix.build_tags }}" -trimpath -ldflags="-w -s" -o ../dist/uv-runner-gui-${{ matrix.suffix }}
+        else
+          go build -trimpath -ldflags="-w -s" -o ../dist/uv-runner-gui-${{ matrix.suffix }}
+        fi
     
     - name: Upload GUI artifacts
       uses: actions/upload-artifact@v4

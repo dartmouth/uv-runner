@@ -4,6 +4,14 @@ CLI_NAME=uv-runner-cli
 GUI_NAME=uv-runner-gui
 BUILD_FLAGS=-ldflags="-w -s" -trimpath
 
+# Detect platform and set GUI build tags
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    GUI_BUILD_TAGS=-tags wayland
+else
+    GUI_BUILD_TAGS=
+endif
+
 # Default target
 .PHONY: all
 all: clean build
@@ -26,7 +34,7 @@ build-cli:
 .PHONY: build-gui
 build-gui:
 	@echo "Building GUI for current platform..."
-	cd uv-runner-gui && go build $(BUILD_FLAGS) -o ../dist/$(GUI_NAME)
+	cd uv-runner-gui && go build $(GUI_BUILD_TAGS) $(BUILD_FLAGS) -o ../dist/$(GUI_NAME)
 
 # Build for all platforms
 .PHONY: build-all
@@ -46,7 +54,7 @@ build-all: clean
 	cd uv-runner-cli && GOOS=windows GOARCH=amd64 go build $(BUILD_FLAGS) -o ../dist/$(CLI_NAME)-windows-x86_64.exe
 	
 	@echo "Building GUI for current platform only (GUI cross-compilation requires platform-specific setup)..."
-	cd uv-runner-gui && go build $(BUILD_FLAGS) -o ../dist/$(GUI_NAME)-$$(go env GOOS)-$$(go env GOARCH)
+	cd uv-runner-gui && go build $(GUI_BUILD_TAGS) $(BUILD_FLAGS) -o ../dist/$(GUI_NAME)-$$(go env GOOS)-$$(go env GOARCH)
 	
 	@echo "Build complete!"
 	@ls -la dist/
@@ -59,7 +67,7 @@ build-gui-all:
 	@echo "This target should be run in CI/CD with multiple platform runners"
 	
 	@echo "Building GUI for current platform..."
-	cd uv-runner-gui && go build $(BUILD_FLAGS) -o ../dist/$(GUI_NAME)-$$(go env GOOS)-$$(go env GOARCH)
+	cd uv-runner-gui && go build $(GUI_BUILD_TAGS) $(BUILD_FLAGS) -o ../dist/$(GUI_NAME)-$$(go env GOOS)-$$(go env GOARCH)
 
 # Test the binaries (builds for current platform and runs a quick test)
 .PHONY: test

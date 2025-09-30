@@ -98,24 +98,25 @@ func (t *smartContrastTheme) Size(name fyne.ThemeSizeName) float32 {
 	return theme.DefaultTheme().Size(name)
 }
 
-const uvVersion = "0.8.19"
+const uvVersion = "0.8.22"
 
 type App struct {
-	fyneApp      fyne.App
-	window       fyne.Window
-	scriptList   *widget.List
-	outputText   *widget.RichText
-	runButton    *widget.Button
-	addButton    *widget.Button
-	removeButton *widget.Button
-	scripts      []string
-	uvPath       string
-	tempDir      string
-	selectedIdx  int         // Track selected item manually
-	outputBuffer string      // Keep track of output text
-	outputMutex  sync.Mutex  // Protect output buffer
-	runningCmds  []*exec.Cmd // Track running processes
-	cmdsMutex    sync.Mutex  // Protect running commands slice
+	fyneApp         fyne.App
+	window          fyne.Window
+	scriptList      *widget.List
+	outputText      *widget.Entry
+	runButton       *widget.Button
+	addButton       *widget.Button
+	removeButton    *widget.Button
+	memoryPathEntry *widget.Entry
+	scripts         []string
+	uvPath          string
+	tempDir         string
+	selectedIdx     int         // Track selected item manually
+	outputBuffer    string      // Keep track of output text
+	outputMutex     sync.Mutex  // Protect output buffer
+	runningCmds     []*exec.Cmd // Track running processes
+	cmdsMutex       sync.Mutex  // Protect running commands slice
 }
 
 func main() {
@@ -186,6 +187,20 @@ func (a *App) setupUI() {
 	a.runButton = widget.NewButton("Run Scripts", a.runScripts)
 	a.runButton.Importance = widget.HighImportance
 
+	// Memory file path entry
+	a.memoryPathEntry = widget.NewEntry()
+	a.memoryPathEntry.SetPlaceHolder("Leave empty for default temp directory")
+
+	browseButton := widget.NewButton("Browse", func() {
+		openDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err == nil && reader != nil {
+				a.memoryPathEntry.SetText(reader.URI().Path())
+				reader.Close()
+			}
+		}, a.window)
+		openDialog.Show()
+	})
+
 	// Theme toggle buttons
 	lightThemeBtn := widget.NewButton("Light Theme", func() {
 		a.fyneApp.Settings().SetTheme(theme.LightTheme())
@@ -197,20 +212,25 @@ func (a *App) setupUI() {
 		a.fyneApp.Settings().SetTheme(&smartContrastTheme{})
 	})
 
-	// Create output area with RichText for better theme support
-	a.outputText = widget.NewRichText()
+	// Create output area with MultiLine Entry for selectable text
+	a.outputText = widget.NewMultiLineEntry()
 	a.outputText.Wrapping = fyne.TextWrapWord
+	a.outputText.Disable() // Disable editing but allow text selection
 
 	outputScroll := container.NewScroll(a.outputText)
 	outputScroll.SetMinSize(fyne.NewSize(400, 200))
 
 	// Layout
 	scriptControls := container.NewHBox(a.addButton, a.removeButton)
+	memoryPathSection := container.NewBorder(
+		nil, nil, widget.NewLabel("Memory File:"), browseButton,
+		a.memoryPathEntry,
+	)
 	themeControls := container.NewHBox(lightThemeBtn, darkThemeBtn, autoThemeBtn)
 
 	scriptSection := container.NewBorder(
 		widget.NewLabel("Python Scripts:"),
-		container.NewVBox(scriptControls, themeControls),
+		container.NewVBox(scriptControls, memoryPathSection, themeControls),
 		nil, nil,
 		a.scriptList,
 	)
@@ -387,7 +407,7 @@ func (a *App) runScripts() {
 
 	a.outputBuffer = "" // Clear output
 	fyne.Do(func() {
-		a.outputText.ParseMarkdown("")
+		a.outputText.SetText("")
 	})
 	a.appendOutput("Starting script execution...\n")
 
@@ -405,6 +425,12 @@ func (a *App) runScripts() {
 		defer cancel()
 
 		cmd := exec.CommandContext(ctx, a.uvPath, args...)
+
+		// Set up environment with MEMORY_FILE_PATH if specified
+		cmd.Env = os.Environ()
+		if a.memoryPathEntry.Text != "" {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("MEMORY_FILE_PATH=%s", a.memoryPathEntry.Text))
+		}
 
 		// Set up process group for proper cleanup on Unix systems
 		if runtime.GOOS != "windows" {
@@ -488,7 +514,9 @@ func (a *App) appendOutput(text string) {
 
 	// Use Fyne's proper threading API
 	fyne.Do(func() {
-		a.outputText.ParseMarkdown("```\n" + newText + "\n```")
+		a.outputText.SetText(newText)
+		// Scroll to bottom
+		a.outputText.CursorRow = len(strings.Split(newText, "\n"))
 	})
 }
 
