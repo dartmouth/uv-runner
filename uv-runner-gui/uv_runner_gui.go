@@ -98,7 +98,7 @@ func (t *smartContrastTheme) Size(name fyne.ThemeSizeName) float32 {
 	return theme.DefaultTheme().Size(name)
 }
 
-const uvVersion = "0.8.22"
+const uvVersion = "0.9.5"
 
 type App struct {
 	fyneApp         fyne.App

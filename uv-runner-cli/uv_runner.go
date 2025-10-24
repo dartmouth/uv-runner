@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-const uvVersion = "0.8.22" // Update as needed
+const uvVersion = "0.9.5" // Update as needed
 
 func main() {
 	// Determine platform and architecture
